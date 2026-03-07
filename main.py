@@ -91,19 +91,25 @@ class UserGameData(Base):
 
 # -------------------- Аутентификация Telegram --------------------
 def validate_init_data(init_data: str) -> bool:
+    # print("=== validate_init_data called ===")
     try:
         data_dict = {}
         for item in init_data.split('&'):
             key, value = item.split('=', 1)
             data_dict[key] = urllib.parse.unquote(value)
 
+        # print(f"Keys: {list(data_dict.keys())}")
+
         received_hash = data_dict.pop('hash', None)
         if not received_hash:
             return False
 
+        # print(f"Received hash: {received_hash}")
+
         data_check_string = '\n'.join(
             f"{k}={v}" for k, v in sorted(data_dict.items())
         )
+        # print(f"Data string: {data_check_string}")
 
         secret_key = hmac.new(
             key=b"WebAppData",
@@ -116,6 +122,8 @@ def validate_init_data(init_data: str) -> bool:
             msg=data_check_string.encode(),
             digestmod=hashlib.sha256
         ).hexdigest()
+
+        # print(f"Calculated hash: {calculated_hash}")
 
         return calculated_hash == received_hash
     except Exception:
@@ -406,7 +414,7 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Middleware для логирования запросов (опционально)
+# Middleware для логирования запросов
 @fastapi_app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
@@ -417,14 +425,14 @@ async def log_requests(request: Request, call_next):
 # Подключаем роутер
 fastapi_app.include_router(router)
 
-# Тестовый эндпоинт
+# Тестовые эндпоинты
 @fastapi_app.get("/ping")
 async def ping():
     return {"ping": "pong"}
 
-@fastapi_app.get("/docs")
-async def custom_docs():
-    return {"message": "docs are at /docs"}
+@fastapi_app.get("/")
+async def root():
+    return {"message": "API is running", "docs": "/docs"}
 
 # -------------------- Запуск --------------------
 port = int(os.getenv("PORT", 8000))
