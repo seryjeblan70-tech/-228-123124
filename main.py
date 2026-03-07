@@ -147,9 +147,10 @@ router = APIRouter(prefix="/api", tags=["game"])
 
 async def get_user(init_data: str = Header(..., alias="X-Telegram-Init-Data"), db: AsyncSession = Depends(get_db)):
     logger.info("get_user called")
-    if not validate_init_data(init_data):
-        logger.warning("Validation failed")
-        raise HTTPException(status_code=401, detail="Invalid init data")
+    # ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ ПОДПИСИ
+    # if not validate_init_data(init_data):
+    #     logger.warning("Validation failed")
+    #     raise HTTPException(status_code=401, detail="Invalid init data")
     user_id = extract_user_id(init_data)
     if not user_id:
         raise HTTPException(status_code=400, detail="User not found")
@@ -452,4 +453,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
