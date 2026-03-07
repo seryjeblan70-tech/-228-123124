@@ -91,26 +91,19 @@ class UserGameData(Base):
 
 # -------------------- Аутентификация Telegram --------------------
 def validate_init_data(init_data: str) -> bool:
-    print("=== validate_init_data called ===")
     try:
         data_dict = {}
         for item in init_data.split('&'):
             key, value = item.split('=', 1)
             data_dict[key] = urllib.parse.unquote(value)
 
-        print(f"Keys in data_dict: {list(data_dict.keys())}")
-
         received_hash = data_dict.pop('hash', None)
         if not received_hash:
-            print("No hash in init_data")
             return False
-
-        print(f"Received hash: {received_hash}")
 
         data_check_string = '\n'.join(
             f"{k}={v}" for k, v in sorted(data_dict.items())
         )
-        print(f"Data check string: {data_check_string}")
 
         secret_key = hmac.new(
             key=b"WebAppData",
@@ -124,50 +117,30 @@ def validate_init_data(init_data: str) -> bool:
             digestmod=hashlib.sha256
         ).hexdigest()
 
-        print(f"Calculated hash: {calculated_hash}")
-
-        result = calculated_hash == received_hash
-        print("✅ Hash OK" if result else "❌ HASH MISMATCH")
-        return result
-    except Exception as e:
-        print(f"Exception in validate_init_data: {e}")
+        return calculated_hash == received_hash
+    except Exception:
         return False
 
 def extract_user_id(init_data: str) -> int:
-    """Безопасно извлекает user_id из init_data, игнорируя битые элементы."""
-    if not init_data:
-        print("extract_user_id: init_data is empty")
-        return None
     data_dict = {}
     for item in init_data.split('&'):
-        if not item:
-            continue
-        if '=' not in item:
-            print(f"extract_user_id: skipping malformed item: {item}")
-            continue
         key, value = item.split('=', 1)
         data_dict[key] = urllib.parse.unquote(value)
     user_json = data_dict.get('user', '{}')
-    try:
-        user = json.loads(user_json)
-        return user.get('id')
-    except json.JSONDecodeError:
-        print(f"extract_user_id: invalid user JSON: {user_json}")
-        return None
+    user = json.loads(user_json)
+    return user.get('id')
+
 # -------------------- Эндпоинты FastAPI --------------------
 router = APIRouter(prefix="/api", tags=["game"])
 
 async def get_user(init_data: str = Header(..., alias="X-Telegram-Init-Data"), db: AsyncSession = Depends(get_db)):
     logger.info("get_user called")
-    # ВРЕМЕННО ОТКЛЮЧАЕМ ВСЕ ПРОВЕРКИ
-    # Просто создаём или получаем пользователя
+    if not validate_init_data(init_data):
+        logger.warning("Validation failed")
+        raise HTTPException(status_code=401, detail="Invalid init data")
     user_id = extract_user_id(init_data)
     if not user_id:
-        # Если не смогли извлечь ID, создаём тестового пользователя (для отладки)
-        # В реальности здесь нужно возвращать ошибку, но пока пропускаем
-        logger.warning("Could not extract user_id, creating temp user")
-        user_id = 0  # или любой другой временный ID
-    
+        raise HTTPException(status_code=400, detail="User not found")
     result = await db.execute(select(UserGameData).where(UserGameData.telegram_id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -361,7 +334,7 @@ async def claim_quest(payload: dict, user: UserGameData = Depends(get_user), db:
 @router.post("/upgrade_pet")
 async def upgrade_pet(payload: dict, user: UserGameData = Depends(get_user), db: AsyncSession = Depends(get_db)):
     pet_id = payload.get("petId")
-    # Заглушка – реализуйте позже
+    # Заглушка
     raise HTTPException(status_code=501, detail="Not implemented")
 
 @router.post("/select_pet")
@@ -411,7 +384,7 @@ async def cmd_start(message: types.Message):
     if len(args) > 1 and args[1].startswith('ref_'):
         try:
             invited_by = int(args[1][4:])
-            # Здесь можно вызвать эндпоинт или обновить БД напрямую
+            # Здесь можно вызвать эндпоинт или прямо обновить БД
         except:
             pass
     keyboard = InlineKeyboardMarkup(
@@ -433,7 +406,7 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Middleware для логирования запросов
+# Middleware для логирования запросов (опционально)
 @fastapi_app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
@@ -444,14 +417,14 @@ async def log_requests(request: Request, call_next):
 # Подключаем роутер
 fastapi_app.include_router(router)
 
-# Тестовые эндпоинты
+# Тестовый эндпоинт
 @fastapi_app.get("/ping")
 async def ping():
     return {"ping": "pong"}
 
-@fastapi_app.get("/")
-async def root():
-    return {"message": "API is running", "docs": "/docs"}
+@fastapi_app.get("/docs")
+async def custom_docs():
+    return {"message": "docs are at /docs"}
 
 # -------------------- Запуск --------------------
 port = int(os.getenv("PORT", 8000))
@@ -467,6 +440,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
