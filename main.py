@@ -94,13 +94,20 @@ def validate_init_data(init_data: str) -> bool:
     try:
         data_dict = {}
         for item in init_data.split('&'):
+            if not item:
+                continue
+            if '=' not in item:
+                logger.warning(f"Skipping malformed item in init_data: {item}")
+                continue
             key, value = item.split('=', 1)
             data_dict[key] = urllib.parse.unquote(value)
 
         received_hash = data_dict.pop('hash', None)
         if not received_hash:
+            logger.warning("No hash in init_data")
             return False
 
+        # Сортируем ключи и формируем строку проверки
         data_check_string = '\n'.join(
             f"{k}={v}" for k, v in sorted(data_dict.items())
         )
@@ -118,7 +125,8 @@ def validate_init_data(init_data: str) -> bool:
         ).hexdigest()
 
         return calculated_hash == received_hash
-    except Exception:
+    except Exception as e:
+        logger.error(f"Exception in validate_init_data: {e}")
         return False
 
 def extract_user_id(init_data: str) -> int:
@@ -439,4 +447,5 @@ async def main():
     )
 
 if __name__ == "__main__":
+
     asyncio.run(main())
