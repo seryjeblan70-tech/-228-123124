@@ -91,6 +91,7 @@ class UserGameData(Base):
 
 # -------------------- Аутентификация Telegram --------------------
 def validate_init_data(init_data: str) -> bool:
+    # Раскомментируйте следующие строки для отладки, если нужны детали
     # print("=== validate_init_data called ===")
     try:
         data_dict = {}
@@ -126,7 +127,8 @@ def validate_init_data(init_data: str) -> bool:
         # print(f"Calculated hash: {calculated_hash}")
 
         return calculated_hash == received_hash
-    except Exception:
+    except Exception as e:
+        print(f"Exception in validate_init_data: {e}")
         return False
 
 def extract_user_id(init_data: str) -> int:
@@ -342,7 +344,7 @@ async def claim_quest(payload: dict, user: UserGameData = Depends(get_user), db:
 @router.post("/upgrade_pet")
 async def upgrade_pet(payload: dict, user: UserGameData = Depends(get_user), db: AsyncSession = Depends(get_db)):
     pet_id = payload.get("petId")
-    # Заглушка
+    # Заглушка – реализуйте позже
     raise HTTPException(status_code=501, detail="Not implemented")
 
 @router.post("/select_pet")
@@ -392,7 +394,7 @@ async def cmd_start(message: types.Message):
     if len(args) > 1 and args[1].startswith('ref_'):
         try:
             invited_by = int(args[1][4:])
-            # Здесь можно вызвать эндпоинт или прямо обновить БД
+            # Здесь можно вызвать эндпоинт или обновить БД напрямую
         except:
             pass
     keyboard = InlineKeyboardMarkup(
