@@ -91,26 +91,26 @@ class UserGameData(Base):
 
 # -------------------- Аутентификация Telegram --------------------
 def validate_init_data(init_data: str) -> bool:
-    # Раскомментируйте следующие строки для отладки, если нужны детали
-    # print("=== validate_init_data called ===")
+    print("=== validate_init_data called ===")
     try:
         data_dict = {}
         for item in init_data.split('&'):
             key, value = item.split('=', 1)
             data_dict[key] = urllib.parse.unquote(value)
 
-        # print(f"Keys: {list(data_dict.keys())}")
+        print(f"Keys in data_dict: {list(data_dict.keys())}")
 
         received_hash = data_dict.pop('hash', None)
         if not received_hash:
+            print("No hash in init_data")
             return False
 
-        # print(f"Received hash: {received_hash}")
+        print(f"Received hash: {received_hash}")
 
         data_check_string = '\n'.join(
             f"{k}={v}" for k, v in sorted(data_dict.items())
         )
-        # print(f"Data string: {data_check_string}")
+        print(f"Data check string: {data_check_string}")
 
         secret_key = hmac.new(
             key=b"WebAppData",
@@ -124,9 +124,11 @@ def validate_init_data(init_data: str) -> bool:
             digestmod=hashlib.sha256
         ).hexdigest()
 
-        # print(f"Calculated hash: {calculated_hash}")
+        print(f"Calculated hash: {calculated_hash}")
 
-        return calculated_hash == received_hash
+        result = calculated_hash == received_hash
+        print("✅ Hash OK" if result else "❌ HASH MISMATCH")
+        return result
     except Exception as e:
         print(f"Exception in validate_init_data: {e}")
         return False
@@ -450,3 +452,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
