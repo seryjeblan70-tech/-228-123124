@@ -34,7 +34,6 @@ if not ADMIN_ID:
     logger.warning("ADMIN_ID не задан, функции администратора будут недоступны")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./game.db")
-MINI_APP_URL = "https://seryjeblan70-tech.github.io/my-pets-bot-app123123/"  # ваш клиент
 
 # -------------------- База данных --------------------
 engine = create_async_engine(DATABASE_URL, echo=True)
