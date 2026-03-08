@@ -34,7 +34,7 @@ if not ADMIN_ID:
     logger.warning("ADMIN_ID не задан, функции администратора будут недоступны")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./game.db")
-MINI_APP_URL = "https://t.me/yourpetaibot/yourpet_app"
+MINI_APP_URL = "https://seryjeblan70-tech.github.io/my-pets-bot-app123123/"
 
 # -------------------- База данных --------------------
 engine = create_async_engine(DATABASE_URL, echo=True)
@@ -477,4 +477,5 @@ async def main():
 if __name__ == "__main__":
 
     asyncio.run(main())
+
 
