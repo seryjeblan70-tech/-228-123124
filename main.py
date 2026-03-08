@@ -105,6 +105,18 @@ class ActiveEvent(Base):
     expires_at = Column(DateTime, nullable=False)
 
 # -------------------- Вспомогательные функции (подпись отключена!) --------------------
+
+async def cleanup_expired_events():
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                await db.execute(delete(ActiveEvent).where(ActiveEvent.expires_at < datetime.utcnow()))
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+        await asyncio.sleep(10)
+
+
 def extract_user_id(init_data: str) -> Optional[int]:
     """Извлекает user_id из init_data, если не получается – возвращает None."""
     if not init_data:
