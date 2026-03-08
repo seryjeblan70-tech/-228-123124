@@ -167,7 +167,7 @@ async def get_admin_user(init_data: str = Header(..., alias="X-Telegram-Init-Dat
     return user
 
 # -------------------- Эндпоинты FastAPI (БЕЗ ПРЕФИКСА /api) --------------------
-router = APIRouter(tags=["game"])
+router = APIRouter(prefix="/api", tags=["game"])
 
 # ----- Игровые эндпоинты -----
 @router.post("/init")
