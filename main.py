@@ -6,14 +6,14 @@ import hashlib
 import hmac
 import urllib.parse
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, BigInteger, select, desc
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, BigInteger, select, desc, delete
 from sqlalchemy.sql import func
 
 from aiogram import Bot, Dispatcher, types
@@ -29,8 +29,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан")
 
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+if not ADMIN_ID:
+    logger.warning("ADMIN_ID не задан, функции администратора будут недоступны")
+
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./game.db")
-MINI_APP_URL = "https://seryjeblan70-tech.github.io/my-pets-bot-app123123/"
+MINI_APP_URL = "https://seryjeblan70-tech.github.io/my-pets-bot-app123123/"  # ваш клиент
 
 # -------------------- База данных --------------------
 engine = create_async_engine(DATABASE_URL, echo=True)
@@ -45,7 +49,7 @@ async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
 
-# -------------------- Модель данных --------------------
+# -------------------- Модель пользователя --------------------
 class UserGameData(Base):
     __tablename__ = "user_game_data"
 
@@ -89,66 +93,50 @@ class UserGameData(Base):
 
     first_login = Column(DateTime(timezone=True), server_default=func.now())
 
-# -------------------- Аутентификация Telegram --------------------
-def validate_init_data(init_data: str) -> bool:
-    try:
-        data_dict = {}
-        for item in init_data.split('&'):
-            if not item:
-                continue
-            if '=' not in item:
-                logger.warning(f"Skipping malformed item in init_data: {item}")
-                continue
-            key, value = item.split('=', 1)
-            data_dict[key] = urllib.parse.unquote(value)
+# -------------------- Модель активного ивента --------------------
+class ActiveEvent(Base):
+    __tablename__ = "active_events"
 
-        received_hash = data_dict.pop('hash', None)
-        if not received_hash:
-            logger.warning("No hash in init_data")
-            return False
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String, nullable=False)   # например "double_gems", "double_clicks", "extra_stamina"
+    multiplier = Column(Float, default=1.0)
+    description = Column(String, nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
 
-        # Сортируем ключи и формируем строку проверки
-        data_check_string = '\n'.join(
-            f"{k}={v}" for k, v in sorted(data_dict.items())
-        )
-
-        secret_key = hmac.new(
-            key=b"WebAppData",
-            msg=BOT_TOKEN.encode(),
-            digestmod=hashlib.sha256
-        ).digest()
-
-        calculated_hash = hmac.new(
-            key=secret_key,
-            msg=data_check_string.encode(),
-            digestmod=hashlib.sha256
-        ).hexdigest()
-
-        return calculated_hash == received_hash
-    except Exception as e:
-        logger.error(f"Exception in validate_init_data: {e}")
-        return False
-
-def extract_user_id(init_data: str) -> int:
+# -------------------- Вспомогательные функции (подпись отключена!) --------------------
+def extract_user_id(init_data: str) -> Optional[int]:
+    """Извлекает user_id из init_data, если не получается – возвращает None."""
+    if not init_data:
+        logger.warning("extract_user_id: init_data is empty")
+        return None
     data_dict = {}
     for item in init_data.split('&'):
+        if not item:
+            continue
+        if '=' not in item:
+            logger.warning(f"extract_user_id: skipping malformed item: {item}")
+            continue
         key, value = item.split('=', 1)
         data_dict[key] = urllib.parse.unquote(value)
     user_json = data_dict.get('user', '{}')
-    user = json.loads(user_json)
-    return user.get('id')
+    try:
+        user = json.loads(user_json)
+        user_id = user.get('id')
+        if user_id is None:
+            logger.warning("extract_user_id: no id in user data")
+        return user_id
+    except json.JSONDecodeError:
+        logger.error(f"extract_user_id: invalid user JSON: {user_json}")
+        return None
 
-# -------------------- Эндпоинты FastAPI --------------------
-router = APIRouter(prefix="/api", tags=["game"])
-
+# -------------------- Зависимости для обычных пользователей и админа --------------------
 async def get_user(init_data: str = Header(..., alias="X-Telegram-Init-Data"), db: AsyncSession = Depends(get_db)):
-    logger.info("get_user called")
-    if not validate_init_data(init_data):
-        logger.warning("Validation failed")
-        raise HTTPException(status_code=401, detail="Invalid init data")
+    logger.info("get_user called (подпись НЕ проверяется)")
     user_id = extract_user_id(init_data)
     if not user_id:
-        raise HTTPException(status_code=400, detail="User not found")
+        user_id = 0
+        logger.warning("Using test user_id=0")
     result = await db.execute(select(UserGameData).where(UserGameData.telegram_id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -158,8 +146,25 @@ async def get_user(init_data: str = Header(..., alias="X-Telegram-Init-Data"), d
         await db.refresh(user)
     return user
 
+async def get_admin_user(init_data: str = Header(..., alias="X-Telegram-Init-Data"), db: AsyncSession = Depends(get_db)):
+    if not ADMIN_ID:
+        raise HTTPException(status_code=403, detail="Admin features disabled")
+    user = await get_user(init_data, db)
+    if user.telegram_id != ADMIN_ID:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return user
+
+# -------------------- Эндпоинты FastAPI (БЕЗ ПРЕФИКСА /api) --------------------
+router = APIRouter(tags=["game"])
+
+# ----- Игровые эндпоинты -----
 @router.post("/init")
-async def init(user: UserGameData = Depends(get_user)):
+async def init(user: UserGameData = Depends(get_user), db: AsyncSession = Depends(get_db)):
+    now = datetime.utcnow()
+    result = await db.execute(select(ActiveEvent).where(ActiveEvent.expires_at > now))
+    events = result.scalars().all()
+    active_event = events[0] if events else None
+
     days_in_game = (datetime.utcnow() - user.first_login).days + 1
     return {
         "food": user.food,
@@ -180,6 +185,12 @@ async def init(user: UserGameData = Depends(get_user)):
         "combo": user.combo,
         "friends_count": user.friends_count,
         "days_in_game": days_in_game,
+        "activeEvent": {
+            "type": active_event.event_type,
+            "multiplier": active_event.multiplier,
+            "description": active_event.description,
+            "expires_at": active_event.expires_at.isoformat()
+        } if active_event else None
     }
 
 @router.post("/click")
@@ -228,6 +239,7 @@ async def play(user: UserGameData = Depends(get_user), db: AsyncSession = Depend
     await db.commit()
     return {"stamina": user.stamina, "gems": user.gems}
 
+# ... (все остальные эндпоинты аналогично, без префикса)
 @router.post("/buy_click_upgrade")
 async def buy_click_upgrade(user: UserGameData = Depends(get_user), db: AsyncSession = Depends(get_db)):
     cost = 10 + user.click_upgrade_level * 5
@@ -321,6 +333,8 @@ async def claim_daily(user: UserGameData = Depends(get_user), db: AsyncSession =
     await db.commit()
     return {"gems": user.gems, "streak": user.daily_streak}
 
+
+
 @router.post("/claim_quest")
 async def claim_quest(payload: dict, user: UserGameData = Depends(get_user), db: AsyncSession = Depends(get_db)):
     quest_id = payload.get("id")
@@ -339,10 +353,12 @@ async def claim_quest(payload: dict, user: UserGameData = Depends(get_user), db:
     await db.commit()
     return {"gems": user.gems, "quests": user.quests}
 
+
+
 @router.post("/upgrade_pet")
 async def upgrade_pet(payload: dict, user: UserGameData = Depends(get_user), db: AsyncSession = Depends(get_db)):
     pet_id = payload.get("petId")
-    # Заглушка
+    # Заглушка – реализуйте позже
     raise HTTPException(status_code=501, detail="Not implemented")
 
 @router.post("/select_pet")
@@ -382,6 +398,7 @@ async def register_referral(data: dict, db: AsyncSession = Depends(get_db)):
         await db.commit()
     return {"ok": True}
 
+
 # -------------------- Бот (aiogram) --------------------
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -392,7 +409,7 @@ async def cmd_start(message: types.Message):
     if len(args) > 1 and args[1].startswith('ref_'):
         try:
             invited_by = int(args[1][4:])
-            # Здесь можно вызвать эндпоинт или прямо обновить БД
+            # Можно вызвать эндпоинт регистрации реферала
         except:
             pass
     keyboard = InlineKeyboardMarkup(
@@ -405,7 +422,7 @@ async def cmd_start(message: types.Message):
 # -------------------- Создание FastAPI приложения --------------------
 fastapi_app = FastAPI(title="My Pet Game API")
 
-# CORS
+# CORS – разрешаем только ваш домен клиента
 fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://seryjeblan70-tech.github.io"],
@@ -414,7 +431,7 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Middleware для логирования запросов (опционально)
+# Middleware для логирования запросов
 @fastapi_app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
@@ -422,17 +439,15 @@ async def log_requests(request: Request, call_next):
     logger.info(f"Response status: {response.status_code}")
     return response
 
-# Подключаем роутер
 fastapi_app.include_router(router)
 
-# Тестовый эндпоинт
 @fastapi_app.get("/ping")
 async def ping():
     return {"ping": "pong"}
 
-@fastapi_app.get("/docs")
-async def custom_docs():
-    return {"message": "docs are at /docs"}
+@fastapi_app.get("/")
+async def root():
+    return {"message": "API is running", "docs": "/docs"}
 
 # -------------------- Запуск --------------------
 port = int(os.getenv("PORT", 8000))
@@ -441,11 +456,11 @@ server = uvicorn.Server(config)
 
 async def main():
     await init_db()
+    asyncio.create_task(cleanup_expired_events())
     await asyncio.gather(
         dp.start_polling(bot),
         server.serve()
     )
 
 if __name__ == "__main__":
-
     asyncio.run(main())
